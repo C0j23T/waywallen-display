@@ -235,6 +235,7 @@ struct waywallen_display {
     /* Backend selection. */
     waywallen_backend_t backend;
     waywallen_egl_ctx_t egl;
+    bool                deferred_egl_acquire;
     waywallen_vk_ctx_t  vk;
 
 #ifdef WW_HAVE_EGL
@@ -1097,6 +1098,25 @@ int waywallen_display_bind_egl(waywallen_display_t* d, const waywallen_egl_ctx_t
     }
 #endif
     return WAYWALLEN_OK;
+}
+
+int waywallen_display_set_deferred_egl_acquire(waywallen_display_t* d, bool deferred) {
+    if (! d) return WAYWALLEN_ERR_INVAL;
+    if (d->conn != WW_CONN_DISCONNECTED) return WAYWALLEN_ERR_STATE;
+    d->deferred_egl_acquire = deferred;
+    return WAYWALLEN_OK;
+}
+
+int waywallen_display_wait_egl_acquire(waywallen_display_t* d, int fd) {
+#ifdef WW_HAVE_EGL
+    if (d && d->backend == WAYWALLEN_BACKEND_EGL) {
+        return ww_egl_wait_sync_fd(&d->egl_backend, d->egl.egl_display, fd);
+    }
+#else
+    (void)d;
+#endif
+    if (fd >= 0) close(fd);
+    return WAYWALLEN_ERR_INVAL;
 }
 
 int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx_t* ctx) {
@@ -2851,13 +2871,25 @@ static int handle_frame_ready(waywallen_display_t* d, const uint8_t* body, size_
 
     int   fd_handled        = 0;
     int   release_armed     = 0;
+    int   egl_acquire_fd    = -1;
     void* acquire_semaphore = NULL;
 
 #ifdef WW_HAVE_EGL
     if (! fd_handled && d->backend == WAYWALLEN_BACKEND_EGL && d->egl_backend.loaded) {
-        int rc = ww_egl_wait_sync_fd(&d->egl_backend, d->egl.egl_display, acquire_fd);
-        if (rc != 0) {
-            close(acquire_fd);
+        if (d->deferred_egl_acquire && d->cb.on_frame_ready) {
+            egl_acquire_fd = acquire_fd;
+        } else {
+            int rc = ww_egl_wait_sync_fd(&d->egl_backend, d->egl.egl_display, acquire_fd);
+            if (rc != 0) {
+                (void)resolve_frame_without_gpu(d,
+                                                release_syncobj_fd,
+                                                fr.buffer_generation,
+                                                fr.seq,
+                                                "EGL acquire failure release failed");
+                ww_evt_frame_ready_free(&fr);
+                fire_disconnected(d, rc, "EGL acquire wait failed");
+                return rc;
+            }
         }
         fd_handled = 1;
     }
@@ -2931,6 +2963,7 @@ static int handle_frame_ready(waywallen_display_t* d, const uint8_t* body, size_
     }
 
     waywallen_frame_t frame    = { 0 };
+    frame.egl_acquire_sync_fd  = egl_acquire_fd;
     frame.buffer_index         = fr.buffer_index;
     frame.seq                  = fr.seq;
     frame.vk_acquire_semaphore = acquire_semaphore;

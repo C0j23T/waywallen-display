@@ -237,6 +237,7 @@ pub struct waywallen_frame_t {
     pub vk_acquire_semaphore: *mut c_void,
     pub release_syncobj_fd: c_int,
     pub buffer_generation: u64,
+    pub egl_acquire_sync_fd: c_int,
 }
 
 #[repr(C)]
@@ -440,6 +441,11 @@ extern "C" {
         d: *mut waywallen_display_t,
         ctx: *const waywallen_egl_ctx_t,
     ) -> c_int;
+    pub fn waywallen_display_set_deferred_egl_acquire(
+        d: *mut waywallen_display_t,
+        deferred: bool,
+    ) -> c_int;
+    pub fn waywallen_display_wait_egl_acquire(d: *mut waywallen_display_t, fd: c_int) -> c_int;
     pub fn waywallen_display_bind_vulkan(
         d: *mut waywallen_display_t,
         ctx: *const waywallen_vk_ctx_t,

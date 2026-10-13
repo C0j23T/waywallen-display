@@ -435,10 +435,9 @@ private:
     // arrives — same continuity the Vulkan path gets for free.
     // Most-recent unblitted EGL frame, populated on the GUI thread by
     // c_on_frame_ready and consumed on the render thread by
-    // renderThreadBlitEgl. Mirrors PendingVkFrame but EGL has no
-    // acquire semaphore (GL is queue-ordered, no cross-process sync
-    // needed). Mutex-protected by m_pendingMutex.
+    // renderThreadBlitEgl. Mutex-protected by m_pendingMutex.
     struct PendingEglFrame {
+        int      acquireSyncFd { -1 };
         bool     valid { false };
         int      slot { -1 };
         int      releaseSyncobjFd { -1 };

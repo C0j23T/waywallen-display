@@ -24,6 +24,7 @@
 #    include <stdint.h>
 #    include <stdlib.h>
 #    include <string.h>
+#    include <unistd.h>
 
 /*
  * DRM_FORMAT_MOD_INVALID lives in <drm/drm_fourcc.h> on most distros
@@ -341,12 +342,13 @@ int ww_egl_texture_from_image(const ww_egl_backend_t* backend, EGLImageKHR image
 /* ------------------------------------------------------------------ */
 
 int ww_egl_wait_sync_fd(const ww_egl_backend_t* backend, EGLDisplay display, int sync_fd) {
-    if (! backend || ! backend->loaded) return -ENOSYS;
     if (sync_fd < 0) return -EINVAL;
+    if (! backend || ! backend->loaded) {
+        close(sync_fd);
+        return -ENOSYS;
+    }
 
-    /* Wrap the dma_fence sync_fd as an EGLSync. The driver dup2s the
-     * fd on success, and we transfer ownership to the driver by
-     * returning 0. On failure the caller still owns the fd. */
+    /* EGL owns the fd once sync creation succeeds. */
     const EGLint attrs[] = {
         EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
         (EGLint)sync_fd,
@@ -354,6 +356,7 @@ int ww_egl_wait_sync_fd(const ww_egl_backend_t* backend, EGLDisplay display, int
     };
     EGLSyncKHR sync = backend->eglCreateSyncKHR(display, EGL_SYNC_NATIVE_FENCE_ANDROID, attrs);
     if (sync == EGL_NO_SYNC_KHR) {
+        close(sync_fd);
         return -EIO;
     }
 
@@ -363,12 +366,6 @@ int ww_egl_wait_sync_fd(const ww_egl_backend_t* backend, EGLDisplay display, int
     EGLint waited = backend->eglWaitSyncKHR(display, sync, 0);
     (void)backend->eglDestroySyncKHR(display, sync);
     if (waited != EGL_TRUE) {
-        /* On failure EGL did not wrap the fd (per EGL_ANDROID_native_fence_sync
-         * §3.8.2.4): "If eglCreateSyncKHR fails, the fd attribute is
-         * unchanged; otherwise EGL takes ownership". Since we already
-         * succeeded in eglCreateSyncKHR, ownership has transferred
-         * regardless of eglWaitSyncKHR's return value. So we must NOT
-         * double-close here. */
         return -EIO;
     }
     return 0;

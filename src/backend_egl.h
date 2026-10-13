@@ -181,9 +181,7 @@ int ww_egl_query_format_caps(const ww_egl_backend_t* backend, EGLDisplay egl_dis
 
 /*
  * Consume a `dma_fence` sync_fd and queue a GPU-side wait on the
- * current GL context. On success the fd ownership transfers to EGL
- * (the kernel closes it when the wrapping EGLSync is destroyed). On
- * failure the caller retains the fd and must close it itself.
+ * current GL context. Consumes the fd on both success and failure.
  *
  * Requires the driver to advertise `EGL_ANDROID_native_fence_sync`.
  */

@@ -11,19 +11,21 @@
  *   - `char *` members of event callbacks are valid only for the
  *     duration of the callback invocation; copy before returning.
  *   - File descriptors the library receives from the wire (dma_buf
- *     fds, acquire sync_fds) are owned by the library and closed
- *     automatically. The host never sees raw fds.
+ *     fds, acquire sync_fds) are owned by the library unless a callback
+ *     field explicitly transfers ownership to the host.
  *
  * Threading:
  *   A single `waywallen_display_t` is NOT thread-safe. Most methods
  *   must be called on the same thread (the lib's "session thread").
- *   Two exceptions, intended for cross-thread integration:
+ *   Exceptions intended for cross-thread integration:
  *     - `waywallen_display_get_fd` is safe to read from any thread.
  *     - `waywallen_display_drain` is safe to call from a different
  *       thread than `dispatch`/`handle_writable`/etc., because it
  *       only touches the internally-locked pending-destroy list.
  *       This is what lets QML hosts run drain on the render thread
  *       while session I/O lives on the GUI thread.
+ *     - `waywallen_display_wait_egl_acquire` may run on the render
+ *       thread while the bound display session remains alive.
  *
  * Error handling:
  *   Functions return 0 on success and a negative errno-ish value on
@@ -281,10 +283,8 @@ typedef struct waywallen_binding {
 typedef struct waywallen_frame {
     uint32_t buffer_index;
     uint64_t seq;
-    /* Imported acquire semaphore (VkSemaphore). NULL if the library
-     * could not import (e.g. EGL backend, or VK import failed); the
-     * acquire sync_fd was closed in that case. The host must attach
-     * this to its next `VkQueueSubmit`'s wait list. */
+    /* Imported acquire semaphore (VkSemaphore), or NULL when unavailable.
+     * The host must attach this to its next VkQueueSubmit wait list. */
     void* vk_acquire_semaphore;
     /* Raw drm_syncobj fd (binary, unsignaled). Ownership transfers
      * to the host. Attach the consume submission's real sync_file via
@@ -295,6 +295,10 @@ typedef struct waywallen_frame {
      * -1 means the library owns the release path for this backend. */
     int      release_syncobj_fd;
     uint64_t buffer_generation;
+    /* Deferred EGL acquire fence, or -1. The host must consume it with
+     * waywallen_display_wait_egl_acquire() before sampling, or close it
+     * when dropping the frame. Only supplied after explicit opt-in. */
+    int egl_acquire_sync_fd;
 } waywallen_frame_t;
 
 typedef struct waywallen_vk_sampled_frame {
@@ -392,6 +396,11 @@ void waywallen_display_shutdown(waywallen_display_t* d);
  * ------------------------------------------------------------------------- */
 
 int waywallen_display_bind_egl(waywallen_display_t* d, const waywallen_egl_ctx_t* ctx);
+/* Configure before connecting when dispatch runs without a current GL context. */
+int waywallen_display_set_deferred_egl_acquire(waywallen_display_t* d, bool deferred);
+/* Requires a current GL context; consumes fd on every return path. May run
+ * on the render thread while the bound display session remains alive. */
+int waywallen_display_wait_egl_acquire(waywallen_display_t* d, int fd);
 int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx_t* ctx);
 
 /* Requirements for a host-owned Vulkan device used by bind_vulkan.

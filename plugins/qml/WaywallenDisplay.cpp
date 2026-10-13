@@ -262,6 +262,7 @@ void WaywallenDisplay::c_on_frame_ready(void* ud, const waywallen_frame_t* f) {
             self->m_presentationState, f->buffer_generation, &incoming);
     }
     if (! validIncoming) {
+        if (f->egl_acquire_sync_fd >= 0) ::close(f->egl_acquire_sync_fd);
         qCWarning(lcWD,
                   "dropping frame for unconfigured generation=%llu",
                   qulonglong(f->buffer_generation));
@@ -301,12 +302,14 @@ void WaywallenDisplay::c_on_frame_ready(void* ud, const waywallen_frame_t* f) {
         // is copied exactly once by the job that consumes it.
         {
             QMutexLocker lk(&self->m_pendingMutex);
+            if (self->m_pendingEgl.acquireSyncFd >= 0) ::close(self->m_pendingEgl.acquireSyncFd);
             if (self->m_pendingEgl.valid && self->m_pendingEgl.releaseSyncobjFd >= 0) {
                 self->signalFrameRelease(self->m_pendingEgl.releaseSyncobjFd,
                                          self->m_pendingEgl.buffer_generation,
                                          self->m_pendingEgl.seq,
                                          "superseded EGL frame");
             }
+            self->m_pendingEgl.acquireSyncFd     = f->egl_acquire_sync_fd;
             self->m_pendingEgl.valid             = true;
             self->m_pendingEgl.slot              = static_cast<int>(f->buffer_index);
             self->m_pendingEgl.releaseSyncobjFd  = f->release_syncobj_fd;
@@ -1451,6 +1454,7 @@ void WaywallenDisplay::tryConnect() {
             this);
     }
 
+    (void)waywallen_display_set_deferred_egl_acquire(display, true);
     if (waywallen_display_set_pause_effect_caps(display, m_pauseEffectCapabilities) !=
             WAYWALLEN_OK ||
         waywallen_display_set_transition_caps(display, m_transitionCapabilities) != WAYWALLEN_OK) {
@@ -1715,6 +1719,7 @@ void WaywallenDisplay::flushPendingRelease() {
         frame        = m_pendingEgl;
         m_pendingEgl = PendingEglFrame {};
     }
+    if (frame.acquireSyncFd >= 0) ::close(frame.acquireSyncFd);
     if (frame.releaseSyncobjFd >= 0) {
         signalFrameRelease(
             frame.releaseSyncobjFd, frame.buffer_generation, frame.seq, "skipped EGL frame");
