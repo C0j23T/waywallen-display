@@ -22,6 +22,7 @@
 #    include <vulkan/vulkan.h>
 #endif
 #include <cerrno>
+#include <unistd.h>
 
 // ---------------------------------------------------------------------------
 // EGL: deferred GL texture creation (called on render thread)
@@ -120,8 +121,23 @@ void WaywallenDisplay::renderThreadBlitEgl() {
         reuseCandidate = replacesPresentation && m_preparedEglContent.valid &&
                          m_preparedEglContent.buffer_generation == frame.buffer_generation;
     }
-    if (! incoming.valid || m_activeBackend != BackendEGL || ! m_eglImagesValid) {
+    auto resourcesOwner = renderSessionResources();
+    if (! incoming.valid || ! resourcesOwner || m_activeBackend != BackendEGL ||
+        ! m_eglImagesValid) {
+        if (frame.acquireSyncFd >= 0) ::close(frame.acquireSyncFd);
         releaseEglFrame(frame.releaseSyncobjFd, false, frame.buffer_generation, frame.seq);
+        return;
+    }
+    const int rc = waywallen_display_wait_egl_acquire(resourcesOwner->display, frame.acquireSyncFd);
+    if (rc != WAYWALLEN_OK) {
+        releaseEglFrame(frame.releaseSyncobjFd, false, frame.buffer_generation, frame.seq);
+        QPointer<WaywallenDisplay> guard(this);
+        QMetaObject::invokeMethod(
+            this,
+            [guard, rc]() {
+                if (guard) guard->handleDisconnect(rc, "EGL acquire wait failed");
+            },
+            Qt::QueuedConnection);
         return;
     }
     // EGLImage → GL texture binding is render-thread work; safe here.
