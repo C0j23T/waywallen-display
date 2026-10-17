@@ -141,6 +141,10 @@ typedef struct waywallen_consumer_capabilities {
     uint32_t extent_max_h;
 } waywallen_consumer_capabilities_t;
 
+typedef struct waywallen_display_identity {
+    uint32_t role;
+} waywallen_display_identity_t;
+
 typedef struct waywallen_display_metrics {
     uint32_t width;
     uint32_t height;

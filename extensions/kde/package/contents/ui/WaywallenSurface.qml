@@ -3,6 +3,8 @@ import QtQuick.Effects
 import "Plugin" as P
 
 Item {
+    id: root
+    required property bool lockScreen
     property alias display: displayItem
     readonly property bool blurLoaded: blurLoader.status === Loader.Ready
 
@@ -11,7 +13,8 @@ Item {
         anchors.fill: parent
 
         autoReconnect: true
-        windowObservationCapabilities: 15
+        displayRole: root.lockScreen ? P.PluginDisplay.LockScreenRole : P.PluginDisplay.DesktopRole
+        windowObservationCapabilities: root.lockScreen ? 0 : 15
         pauseEffectCapabilities: P.PluginDisplay.PauseEffectBlurCapability
         transitionCapabilities: P.PluginDisplay.TransitionFadeCapability
                                 | P.PluginDisplay.TransitionWipeCapability

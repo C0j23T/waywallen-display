@@ -170,6 +170,10 @@ typedef struct waywallen_consumer_capabilities {
     uint32_t extent_max_h;
 } waywallen_consumer_capabilities_t;
 
+typedef struct waywallen_display_identity {
+    uint32_t role;
+} waywallen_display_identity_t;
+
 typedef struct waywallen_display_metrics {
     uint32_t width;
     uint32_t height;
@@ -244,6 +248,7 @@ void waywallen_blur_effect_config_free(waywallen_blur_effect_config_t *value);
 void waywallen_rgba_color_free(waywallen_rgba_color_t *value);
 void waywallen_composition_config_free(waywallen_composition_config_t *value);
 void waywallen_consumer_capabilities_free(waywallen_consumer_capabilities_t *value);
+void waywallen_display_identity_free(waywallen_display_identity_t *value);
 void waywallen_display_metrics_free(waywallen_display_metrics_t *value);
 void waywallen_pause_effect_capabilities_free(waywallen_pause_effect_capabilities_t *value);
 void waywallen_pause_effect_config_free(waywallen_pause_effect_config_t *value);
@@ -358,6 +363,8 @@ typedef struct ww_req_client_capabilities_t {
     waywallen_pause_effect_capabilities_t pause_effect;
     bool has_transition;
     waywallen_transition_capabilities_t transition;
+    bool has_identity;
+    waywallen_display_identity_t identity;
 } ww_req_client_capabilities_t;
 
 typedef struct ww_req_set_window_observation_state_t {

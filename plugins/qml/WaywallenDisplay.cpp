@@ -727,7 +727,9 @@ QString WaywallenDisplay::effectiveInstanceId() const {
     if (key.isEmpty()) return {};
 
     const auto md5 = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Md5).toHex();
-    return QStringLiteral("kde-") + QString::fromLatin1(md5);
+    return (m_displayRole == LockScreenRole ? QStringLiteral("kde-lock-")
+                                            : QStringLiteral("kde-")) +
+           QString::fromLatin1(md5);
 }
 
 uint32_t WaywallenDisplay::screenRefreshMhz() const {
@@ -756,6 +758,19 @@ void WaywallenDisplay::setInstanceId(const QString& id) {
     if (m_instanceId == id) return;
     m_instanceId = id;
     emit instanceIdChanged();
+}
+
+void WaywallenDisplay::setDisplayRole(DisplayRole role) {
+    if ((role != DesktopRole && role != LockScreenRole) || m_displayRole == role) return;
+    const bool reconnect = displayHandle() != nullptr;
+    if (reconnect) cleanup();
+    m_displayRole = role;
+    emit displayRoleChanged();
+    if (m_instanceId.isEmpty()) emit instanceIdChanged();
+    if (reconnect) {
+        setConnState(Disconnected);
+        QMetaObject::invokeMethod(this, &WaywallenDisplay::requestReconnect, Qt::QueuedConnection);
+    }
 }
 
 void WaywallenDisplay::setDisplayWidth(int w) {
@@ -1455,7 +1470,9 @@ void WaywallenDisplay::tryConnect() {
     }
 
     (void)waywallen_display_set_deferred_egl_acquire(display, true);
-    if (waywallen_display_set_pause_effect_caps(display, m_pauseEffectCapabilities) !=
+    if (waywallen_display_set_role(display, static_cast<waywallen_display_role_t>(m_displayRole)) !=
+            WAYWALLEN_OK ||
+        waywallen_display_set_pause_effect_caps(display, m_pauseEffectCapabilities) !=
             WAYWALLEN_OK ||
         waywallen_display_set_transition_caps(display, m_transitionCapabilities) != WAYWALLEN_OK) {
         qCWarning(lcWD, "failed to set presentation capabilities");

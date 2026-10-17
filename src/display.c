@@ -199,7 +199,8 @@ struct waywallen_display {
     ww_codec_recv_state_t hs_recv;
     /* Saved register_display params, captured in begin_connect and
      * applied when WELCOME_WAIT transitions to REGISTER_PEND. */
-    char hs_display_name[256];
+    char                     hs_display_name[256];
+    waywallen_display_role_t role;
     /* Stable per-(DE,screen) identifier used by the daemon as the key
      * into per-display settings. Empty string means "no stable id";
      * the daemon then falls back to keying by `hs_display_name`. */
@@ -967,6 +968,7 @@ waywallen_display_t* waywallen_display_new(const waywallen_display_callbacks_t* 
     d->conn         = WW_CONN_DISCONNECTED;
     d->bound.phase  = WW_STREAM_IDLE;
     d->backend      = WAYWALLEN_BACKEND_NONE;
+    d->role         = WAYWALLEN_DISPLAY_ROLE_DESKTOP;
     d->hs_state     = WW_HS_IDLE;
     d->presentation = presentation_reset_snapshot();
     /* 0 is a valid fd; shadow_dmabuf_fd "unset" sentinel must be -1. */
@@ -1714,30 +1716,22 @@ static int hs_advance_one(waywallen_display_t* d) {
         }
         ww_evt_welcome_free(&welcome);
         ww_codec_recv_state_reset(&d->hs_recv);
-        if (d->window_observation_callback || d->has_pause_effect_caps || d->has_transition_caps) {
-            ww_req_client_capabilities_t caps = {
-                .has_window_observation = d->window_observation_callback != NULL,
-                .window_observation     = { .flags = d->window_observation_caps },
-                .has_pause_effect       = d->has_pause_effect_caps,
-                .pause_effect           = { .flags = d->pause_effect_caps },
-                .has_transition         = d->has_transition_caps,
-                .transition             = { .flags = d->transition_caps }
-            };
-            int rc2 =
-                hs_queue_request(d, WW_REQ_CLIENT_CAPABILITIES, enc_client_capabilities, &caps);
-            if (rc2 != WAYWALLEN_OK) {
-                fire_disconnected(d, rc2, "queue client_capabilities");
-                return rc2;
-            }
-            d->hs_state = WW_HS_CAPABILITIES_PEND;
-            return WAYWALLEN_HS_PROGRESS;
-        }
-        int rc2 = hs_queue_register(d);
+        ww_req_client_capabilities_t caps = {
+            .has_window_observation = d->window_observation_callback != NULL,
+            .window_observation     = { .flags = d->window_observation_caps },
+            .has_pause_effect       = d->has_pause_effect_caps,
+            .pause_effect           = { .flags = d->pause_effect_caps },
+            .has_transition         = d->has_transition_caps,
+            .transition             = { .flags = d->transition_caps },
+            .has_identity           = true,
+            .identity               = { .role = (uint32_t)d->role },
+        };
+        int rc2 = hs_queue_request(d, WW_REQ_CLIENT_CAPABILITIES, enc_client_capabilities, &caps);
         if (rc2 != WAYWALLEN_OK) {
-            fire_disconnected(d, rc2, "queue register_display");
+            fire_disconnected(d, rc2, "queue client_capabilities");
             return rc2;
         }
-        d->hs_state = WW_HS_REGISTER_PEND;
+        d->hs_state = WW_HS_CAPABILITIES_PEND;
         return WAYWALLEN_HS_PROGRESS;
     }
 
@@ -1884,6 +1878,15 @@ static int enc_window_state(const void* m, ww_buf_t* out) {
 static int enc_observation_state(const void* m, ww_buf_t* out) {
     return ww_req_set_window_observation_state_encode(
         (const ww_req_set_window_observation_state_t*)m, out);
+}
+
+int waywallen_display_set_role(waywallen_display_t* d, waywallen_display_role_t role) {
+    if (! d ||
+        (role != WAYWALLEN_DISPLAY_ROLE_DESKTOP && role != WAYWALLEN_DISPLAY_ROLE_LOCK_SCREEN))
+        return WAYWALLEN_ERR_INVAL;
+    if (d->conn != WW_CONN_DISCONNECTED && d->conn != WW_CONN_DEAD) return WAYWALLEN_ERR_STATE;
+    d->role = role;
+    return WAYWALLEN_OK;
 }
 
 int waywallen_display_set_window_observation_callback(

@@ -65,6 +65,8 @@ struct test_state {
     int                  on_presentation_snapshot_count;
     int                  on_presentation_state_count;
     bool                 expect_observation;
+    bool                 has_identity;
+    uint32_t             role;
     bool                 observation_patterns;
     int                  observation_callbacks;
     waywallen_display_t* observation_client;
@@ -322,6 +324,30 @@ static void capture_registration(struct test_state* ts, const ww_req_register_di
 /*  Mock server handlers                                               */
 /* ------------------------------------------------------------------ */
 
+static int receive_client_capabilities(int client_fd, struct test_state* ts) {
+    uint8_t  body_buf[WW_CODEC_MAX_BODY_BYTES];
+    uint16_t op;
+    size_t   body_len, n_fds;
+    int      fds[4];
+    int      rc = ww_codec_recv_request(
+        client_fd, &op, body_buf, sizeof(body_buf), &body_len, fds, 4, &n_fds);
+    if (rc != 0 || op != WW_REQ_CLIENT_CAPABILITIES || n_fds != 0) return -1;
+    ww_req_client_capabilities_t caps;
+    if (ww_req_client_capabilities_decode(body_buf, body_len, &caps) != WW_OK) return -1;
+    assert(caps.has_identity);
+    assert(caps.has_window_observation == ts->expect_observation);
+    if (ts->expect_observation)
+        assert(caps.window_observation.flags == (ts->observation_patterns ? 15u : 3u));
+    ts->has_pause_effect_caps = caps.has_pause_effect;
+    ts->has_transition_caps   = caps.has_transition;
+    ts->pause_effect_caps     = caps.pause_effect.flags;
+    ts->transition_caps       = caps.transition.flags;
+    ts->has_identity          = caps.has_identity;
+    ts->role                  = caps.identity.role;
+    ww_req_client_capabilities_free(&caps);
+    return 0;
+}
+
 /* Full happy-path handshake responder; mirrors what the daemon does. */
 static int handler_full_handshake(int client_fd, struct test_state* ts) {
     (void)ts;
@@ -353,6 +379,7 @@ static int handler_full_handshake(int client_fd, struct test_state* ts) {
     if (rc != 0) return -1;
 
     /* Expect REGISTER_DISPLAY. */
+    if (receive_client_capabilities(client_fd, ts) != 0) return -1;
     rc = ww_codec_recv_request(
         client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
@@ -415,23 +442,9 @@ static int complete_handshake_capture_caps(int client_fd, struct test_state* ts)
     if (rc != 0) return -1;
 
     /* REGISTER_DISPLAY -> DISPLAY_ACCEPTED */
+    if (receive_client_capabilities(client_fd, ts) != 0) return -1;
     rc = ww_codec_recv_request(
         client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
-    if (rc == 0 && op == WW_REQ_CLIENT_CAPABILITIES) {
-        if (n_fds != 0) return -1;
-        ww_req_client_capabilities_t caps;
-        if (ww_req_client_capabilities_decode(body_buf, body_len, &caps) != WW_OK) return -1;
-        assert(caps.has_window_observation == ts->expect_observation);
-        if (ts->expect_observation)
-            assert(caps.window_observation.flags == (ts->observation_patterns ? 15u : 3u));
-        ts->has_pause_effect_caps = caps.has_pause_effect;
-        ts->has_transition_caps   = caps.has_transition;
-        ts->pause_effect_caps     = caps.pause_effect.flags;
-        ts->transition_caps       = caps.transition.flags;
-        ww_req_client_capabilities_free(&caps);
-        rc = ww_codec_recv_request(
-            client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
-    }
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
     ww_req_register_display_t reg;
     if (ww_req_register_display_decode(body_buf, body_len, &reg) != WW_OK) return -1;
@@ -1084,6 +1097,7 @@ static int handler_partial_welcome(int client_fd, struct test_state* ts) {
     ww_buf_free(&body);
 
     /* Continue handshake normally. */
+    if (receive_client_capabilities(client_fd, ts) != 0) return -1;
     rc = ww_codec_recv_request(
         client_fd, &op, body_buf, WW_CODEC_MAX_BODY_BYTES, &body_len, fds, 4, &n_fds);
     if (rc != 0 || op != WW_REQ_REGISTER_DISPLAY) return -1;
@@ -1293,6 +1307,37 @@ static void test_presentation_snapshot_updates_and_disconnect_reset(void) {
     printf("  ok test_presentation_snapshot_updates_and_disconnect_reset\n");
 }
 
+static void test_display_role(void) {
+    assert(waywallen_display_set_role(NULL, WAYWALLEN_DISPLAY_ROLE_DESKTOP) == WAYWALLEN_ERR_INVAL);
+    struct test_state ts;
+    ts_init(&ts);
+    waywallen_display_t* d = make_client(&ts);
+    assert(waywallen_display_set_role(d, (waywallen_display_role_t)42) == WAYWALLEN_ERR_INVAL);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        ts.has_identity = false;
+        ts.role         = 0;
+        pthread_t srv   = spawn_server(&ts, handler_full_handshake_capture_caps);
+        if (attempt == 1)
+            assert(waywallen_display_set_role(d, WAYWALLEN_DISPLAY_ROLE_LOCK_SCREEN) ==
+                   WAYWALLEN_OK);
+        if (attempt == 3)
+            assert(waywallen_display_set_role(d, WAYWALLEN_DISPLAY_ROLE_DESKTOP) == WAYWALLEN_OK);
+        assert(begin_test_display(d, ts.sock_path, 640, 480) == WAYWALLEN_OK);
+        assert(waywallen_display_set_role(d, WAYWALLEN_DISPLAY_ROLE_DESKTOP) ==
+               WAYWALLEN_ERR_STATE);
+        assert(drive_handshake(d, 2000) == WAYWALLEN_OK);
+        pthread_join(srv, NULL);
+        assert(waywallen_display_set_role(d, WAYWALLEN_DISPLAY_ROLE_DESKTOP) ==
+               WAYWALLEN_ERR_STATE);
+        assert(ts.has_identity);
+        assert(ts.role == (attempt == 1 || attempt == 2 ? WAYWALLEN_DISPLAY_ROLE_LOCK_SCREEN
+                                                        : WAYWALLEN_DISPLAY_ROLE_DESKTOP));
+        waywallen_display_close(d);
+    }
+    waywallen_display_free(d);
+    ts_teardown(&ts);
+}
+
 static void test_independent_presentation_capabilities(void) {
     const int cases[][2] = { { -1, -1 }, { 0, -1 }, { -1, 0 }, { 1, 7 }, { 0, 0 } };
     assert(waywallen_display_set_pause_effect_caps(NULL, 0) == WAYWALLEN_ERR_INVAL);
@@ -1314,6 +1359,8 @@ static void test_independent_presentation_capabilities(void) {
         assert(waywallen_display_set_pause_effect_caps(d, 0) == WAYWALLEN_ERR_STATE);
         assert(waywallen_display_set_transition_caps(d, 0) == WAYWALLEN_ERR_STATE);
         assert(drive_handshake(d, 2000) == WAYWALLEN_OK);
+        assert(ts.has_identity);
+        assert(ts.role == WAYWALLEN_DISPLAY_ROLE_DESKTOP);
         assert(ts.has_pause_effect_caps == (cases[i][0] >= 0));
         assert(ts.has_transition_caps == (cases[i][1] >= 0));
         assert(ts.pause_effect_caps == (cases[i][0] >= 0 ? (uint32_t)cases[i][0] : 0));
@@ -1974,6 +2021,7 @@ static void test_frame_release_armed_round_trip(void) {
 /* ------------------------------------------------------------------ */
 
 int main(void) {
+    test_display_role();
     test_independent_presentation_capabilities();
     test_undeclared_pause_effect_is_protocol_error();
     test_window_observation(false);

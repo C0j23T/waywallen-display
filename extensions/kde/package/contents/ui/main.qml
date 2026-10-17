@@ -3,9 +3,13 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
+import "HostIdentity.js" as HostIdentity
 
 WallpaperItem {
     id: root
+
+    readonly property bool inLockScreen: HostIdentity.isLockScreen(Qt.application.name)
+    readonly property bool liveHost: HostIdentity.canConnect(Qt.application.name, Qt.application.arguments)
 
     // Prefer the EDID-derived model (stable across port re-plugs) over the
     // connector name like "DP-1" (which the compositor reassigns when cables
@@ -66,24 +70,27 @@ WallpaperItem {
     // screen's covering windows into a bitmask and push it down to
     // the daemon via WaywallenDisplay.windowStateFlags. The daemon
     // owns the autopause policy; this side only reports raw facts.
-    WindowModel {
-        id: windowModel
-        // TasksModel.filterByScreen expects geometry in the compositor's
-        // global virtual-desktop coords. WallpaperItem's own x/y are local
-        // to its containment parent — both screens report (0, 0) there, so
-        // every wallpaper instance ends up matching the same set of windows.
-        // Screen.virtualX/Y is the per-screen global origin, which is what
-        // makes the per-display filter actually differentiate.
-        screenGeometry: Qt.rect(Screen.virtualX, Screen.virtualY,
-                                Screen.width, Screen.height)
+    Loader {
+        id: windowModelLoader
+        active: root._initDone && HostIdentity.isDesktop(Qt.application.name)
+        sourceComponent: WindowModel {
+            // TasksModel.filterByScreen expects geometry in the compositor's
+            // global virtual-desktop coords. WallpaperItem's own x/y are local
+            // to its containment parent — both screens report (0, 0) there, so
+            // every wallpaper instance ends up matching the same set of windows.
+            // Screen.virtualX/Y is the per-screen global origin, which is what
+            // makes the per-display filter actually differentiate.
+            screenGeometry: Qt.rect(Screen.virtualX, Screen.virtualY,
+                                    Screen.width, Screen.height)
+            observer: surfaceLoader.item ? surfaceLoader.item.display : null
+        }
     }
 
     Loader {
         id: surfaceLoader
         anchors.fill: parent
         asynchronous: false
-        active: root._initDone
-        source: "WaywallenSurface.qml"
+        active: root._initDone && root.liveHost
 
         onLoaded: {
             const d = item.display;
@@ -94,8 +101,7 @@ WallpaperItem {
             d.displayWidth = Qt.binding(() => Math.round(root.width * d.effectiveDevicePixelRatio));
             d.displayHeight = Qt.binding(() => Math.round(root.height * d.effectiveDevicePixelRatio));
             d.mouseForwardEnabled = Qt.binding(() => root.configuration.MouseForward);
-            d.windowStateFlags = Qt.binding(() => windowModel.flags);
-            windowModel.observer = d;
+            d.windowStateFlags = Qt.binding(() => windowModelLoader.item ? windowModelLoader.item.flags : 0);
             d.contentRevisionChanged.connect(root.scheduleAccentColorRefresh);
         }
     }
@@ -199,8 +205,8 @@ WallpaperItem {
                 // the autopause bitmask, so the displayed state and the
                 // reported flags can be cross-checked at a glance.
                 function windowsText() {
-                    const f = windowModel.flags;
-                    const ws = windowModel.windows;
+                    const f = windowModelLoader.item ? windowModelLoader.item.flags : 0;
+                    const ws = windowModelLoader.item ? windowModelLoader.item.windows : [];
                     let s = ws.length + " flags=0x" + f.toString(16)
                           + " [" + flagsBits(f) + "]"
                     if (ws.length === 0) return s
@@ -293,6 +299,7 @@ WallpaperItem {
     }
 
     Component.onCompleted: {
+        surfaceLoader.setSource("WaywallenSurface.qml", { lockScreen: root.inLockScreen });
         root._initDone = true;
         // Async wallpaper: content arrives via the daemon stream, which can
         // take arbitrary time (or never connect, if the daemon is down). We

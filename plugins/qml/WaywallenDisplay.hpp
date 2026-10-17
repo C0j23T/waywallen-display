@@ -29,6 +29,8 @@ class WaywallenDisplay : public QQuickItem {
     Q_PROPERTY(QString socketPath READ socketPath WRITE setSocketPath NOTIFY socketPathChanged)
     Q_PROPERTY(QString displayName READ displayName WRITE setDisplayName NOTIFY displayNameChanged)
     Q_PROPERTY(QString instanceId READ instanceId WRITE setInstanceId NOTIFY instanceIdChanged)
+    Q_PROPERTY(
+        DisplayRole displayRole READ displayRole WRITE setDisplayRole NOTIFY displayRoleChanged)
     Q_PROPERTY(int displayWidth READ displayWidth WRITE setDisplayWidth NOTIFY displayWidthChanged)
     Q_PROPERTY(
         int displayHeight READ displayHeight WRITE setDisplayHeight NOTIFY displayHeightChanged)
@@ -78,6 +80,15 @@ class WaywallenDisplay : public QQuickItem {
                    presentationChanged)
 
 public:
+    enum DisplayRole
+    {
+        DesktopRole    = WAYWALLEN_DISPLAY_ROLE_DESKTOP,
+        LockScreenRole = WAYWALLEN_DISPLAY_ROLE_LOCK_SCREEN,
+    };
+    Q_ENUM(DisplayRole)
+
+    DisplayRole        displayRole() const { return m_displayRole; }
+    void               setDisplayRole(DisplayRole role);
     Q_INVOKABLE bool   excludesWindow(const QString& applicationId, const QString& title) const;
     const QStringList& excludedApplicationIds() const { return m_excludedApplicationIds; }
     const QStringList& excludedWindowTitles() const { return m_excludedWindowTitles; }
@@ -223,6 +234,7 @@ signals:
     void socketPathChanged();
     void displayNameChanged();
     void instanceIdChanged();
+    void displayRoleChanged();
     void displayWidthChanged();
     void displayHeightChanged();
     void effectiveDevicePixelRatioChanged();
@@ -331,6 +343,7 @@ private:
     QString          m_socketPath;
     QString          m_displayName { QStringLiteral("qml-display") };
     QString          m_instanceId;
+    DisplayRole      m_displayRole = DesktopRole;
     int              m_displayWidth { 1920 };
     int              m_displayHeight { 1080 };
     int              m_framesReceived { 0 };

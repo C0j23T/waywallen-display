@@ -469,6 +469,17 @@ int waywallen_display_bind_dmabuf_relay(waywallen_display_t* d);
  */
 int waywallen_display_set_drm_render_node(waywallen_display_t* d, uint32_t major, uint32_t minor);
 
+typedef enum
+{
+    WAYWALLEN_DISPLAY_ROLE_DESKTOP     = 0,
+    WAYWALLEN_DISPLAY_ROLE_LOCK_SCREEN = 1,
+} waywallen_display_role_t;
+
+/* Set registration identity before connecting. Defaults to desktop, is always
+ * sent during registration and is retained across disconnects.
+ * Connected/connecting clients must reconnect. */
+int waywallen_display_set_role(waywallen_display_t* d, waywallen_display_role_t role);
+
 /* Declare final-presentation features implemented by this host. Must
  * be called before begin_connect/connect; capability changes require a
  * reconnect. Generic consumers should leave this at zero. */

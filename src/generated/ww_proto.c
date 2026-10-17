@@ -731,6 +731,59 @@ void waywallen_consumer_capabilities_free(waywallen_consumer_capabilities_t *val
     memset(value, 0, sizeof(*value));
 }
 
+static int w_display_identity(ww_buf_t *b, const waywallen_display_identity_t *v) {
+    int rc;
+    if ((rc = w_u32(b, 1))) return rc;
+    size_t body_length_pos = b->len;
+    if ((rc = w_u32(b, 0))) return rc;
+    {
+        if ((rc = w_u32(b, 1))) return rc;
+        if ((rc = w_u32(b, 2))) return rc;
+        size_t length_pos = b->len;
+        if ((rc = w_u32(b, 0))) return rc;
+        if ((rc = w_u32(b, v->role))) return rc;
+        if (b->len - length_pos - 4 > UINT32_MAX) return WW_ERR_OVERFLOW;
+        tagged_patch_u32(b, length_pos, (uint32_t)(b->len - length_pos - 4));
+    }
+    if (b->len - body_length_pos - 4 > 65520) return WW_ERR_OVERFLOW;
+    tagged_patch_u32(b, body_length_pos, (uint32_t)(b->len - body_length_pos - 4));
+    return WW_OK;
+}
+
+static int rd_display_identity(ww_rd_t *r, waywallen_display_identity_t *v) {
+    int rc;
+    ww_tagged_reader_t fields;
+    if ((rc = tagged_begin(r, &fields))) return rc;
+    bool seen_role = false;
+    while (fields.body.pos != fields.body.len) {
+        uint32_t tag, kind;
+        ww_rd_t field;
+        if ((rc = tagged_next(&fields, &tag, &kind, &field))) return rc;
+        switch (tag) {
+        case 1:
+            if (kind != 2) return WW_ERR_BAD_ARRAY;
+            if ((rc = tagged_validate(kind, field))) return rc;
+            if ((rc = rd_u32(&field, &v->role))) return rc;
+            if (field.pos != field.len) return WW_ERR_TRAILING;
+            seen_role = true;
+            break;
+        default: break;
+        }
+    }
+    if (!seen_role) return WW_ERR_SHORT;
+    return WW_OK;
+}
+
+static void free_display_identity(waywallen_display_identity_t *v) {
+    (void)v;
+}
+
+void waywallen_display_identity_free(waywallen_display_identity_t *value) {
+    if (!value) return;
+    free_display_identity(value);
+    memset(value, 0, sizeof(*value));
+}
+
 static int w_display_metrics(ww_buf_t *b, const waywallen_display_metrics_t *v) {
     int rc;
     if ((rc = w_u32(b, v->width))) return rc;
@@ -1630,6 +1683,13 @@ static int ww_req_client_capabilities_read(ww_rd_t *reader, ww_req_client_capabi
             if (field.pos != field.len) return WW_ERR_TRAILING;
             value->has_transition = true;
             break;
+        case 4:
+            if (kind != 11) return WW_ERR_BAD_ARRAY;
+            if ((rc = tagged_validate(kind, field))) return rc;
+            if ((rc = rd_display_identity(&field, &value->identity))) return rc;
+            if (field.pos != field.len) return WW_ERR_TRAILING;
+            value->has_identity = true;
+            break;
         default: break;
         }
     }
@@ -1669,6 +1729,15 @@ int ww_req_client_capabilities_encode(const ww_req_client_capabilities_t *m, ww_
         if (out->len - length_pos - 4 > UINT32_MAX) return WW_ERR_OVERFLOW;
         tagged_patch_u32(out, length_pos, (uint32_t)(out->len - length_pos - 4));
     }
+    if (m->has_identity) {
+        if ((rc = w_u32(out, 4))) return rc;
+        if ((rc = w_u32(out, 11))) return rc;
+        size_t length_pos = out->len;
+        if ((rc = w_u32(out, 0))) return rc;
+        if ((rc = w_display_identity(out, &m->identity))) return rc;
+        if (out->len - length_pos - 4 > UINT32_MAX) return WW_ERR_OVERFLOW;
+        tagged_patch_u32(out, length_pos, (uint32_t)(out->len - length_pos - 4));
+    }
     if (out->len - body_length_pos - 4 > 65520) return WW_ERR_OVERFLOW;
     tagged_patch_u32(out, body_length_pos, (uint32_t)(out->len - body_length_pos - 4));
     return WW_OK;
@@ -1695,6 +1764,7 @@ void ww_req_client_capabilities_free(ww_req_client_capabilities_t *m) {
     free_window_observation_capabilities(&m->window_observation);
     free_pause_effect_capabilities(&m->pause_effect);
     free_transition_capabilities(&m->transition);
+    free_display_identity(&m->identity);
 }
 
 uint32_t ww_req_client_capabilities_expected_fds(const ww_req_client_capabilities_t *m) {
