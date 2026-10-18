@@ -30,8 +30,8 @@ Item {
     WW.WaywallenDisplay {
         id: displayItem
         anchors.fill: parent
-        displayWidth: root.width
-        displayHeight: root.height
+        displayWidth: Math.round(root.width * effectiveDevicePixelRatio)
+        displayHeight: Math.round(root.height * effectiveDevicePixelRatio)
         pauseEffectCapabilities: WW.WaywallenDisplay.PauseEffectBlurCapability
         transitionCapabilities: WW.WaywallenDisplay.TransitionFadeCapability
                                 | WW.WaywallenDisplay.TransitionWipeCapability
