@@ -62,14 +62,17 @@ function setup() {
         Clutter: {Clone: Actor, FixedLayout: class {}, BinLayout: class {}, AnimationMode: {}},
         BlurController: class { setState() {} destroy() {} },
         PauseEffectKind: {BLUR: 'blur'},
-        global: {get_window_actors: () => windows.filter(w => !w.disposed),
-            display: {get_n_monitors: () => 1}},
+        global: {display: {
+            get_n_monitors: () => 1,
+            list_all_windows: () => windows.filter(w => !w.disposed).map(w => w.meta_window),
+        }},
     });
     function renderer() {
         const actor = new Actor({meta_window: {
             title: `@${Wallpaper.APPLICATION_ID}!{"presentationReady":true}`,
             get_monitor: () => 0,
         }});
+        actor.meta_window.get_compositor_private = () => actor;
         windows.push(actor);
         return {actor, launcher: {ownsWindow: window => window === actor.meta_window}};
     }

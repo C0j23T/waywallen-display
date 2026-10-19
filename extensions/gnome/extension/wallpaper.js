@@ -273,8 +273,9 @@ class LiveWallpaper extends St.Widget {
     }
 
     _findRenderer() {
-        // false bypasses the override that hides our windows elsewhere.
-        const actors = global.get_window_actors(false);
+        const actors = global.display.list_all_windows()
+            .map(window => window.get_compositor_private())
+            .filter(actor => actor);
         const ours = actors.filter(a =>
             a.meta_window.title?.includes(APPLICATION_ID) &&
             this._rendererLauncher?.ownsWindow(a.meta_window) &&
