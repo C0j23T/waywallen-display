@@ -241,7 +241,9 @@ export class GnomeShellOverride {
 
         const group = this._overviewGroup;
 
-        const actors = global.get_window_actors(false);
+        const actors = global.display.list_all_windows()
+            .map(window => window.get_compositor_private())
+            .filter(actor => actor);
         const renderers = actors.filter(a =>
             a?.meta_window?.title?.includes(APPLICATION_ID) &&
             Wallpaper.rendererPresentationReady(a));
