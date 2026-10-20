@@ -1,3 +1,17 @@
+<release version="0.4.3" date="2026-10-20">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Report a distinct lock-screen identity and display role from the KDE wallpaper integration.</li>
+    </ul>
+    <p>Fixed:</p>
+    <ul>
+      <li>Find GNOME renderer windows independently of Shell overrides to prevent black wallpapers with Desktop Icons NG. #78 by @MR-kartoshki</li>
+      <li>Format GNOME renderer diagnostics without relying on Shell string extensions.</li>
+      <li>Report physical pixel dimensions in QML examples on scaled displays.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.4.2" date="2026-10-14">
   <description>
     <p>Fixed:</p>
