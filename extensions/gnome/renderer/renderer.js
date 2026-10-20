@@ -14,6 +14,8 @@ import system from 'system';
 
 import {encodeControlFrame} from '../controlCodec.js';
 
+const {vprintf} = imports.format;
+
 // GLib.unix_fd_source_new / Gio.UnixInputStream moved to the GLibUnix /
 // GioUnix namespaces in gjs 1.86+.
 let GLibUnix = null;
@@ -197,13 +199,13 @@ class MonitorRenderer {
         const ws = `${f & 1 ? _('win') + ' ' : ''}${f & 2 ? _('active') + ' ' : ''}` +
                    `${f & 4 ? _('max') + ' ' : ''}${f & 8 ? _('full') : ''}`.trim() || _('none');
         this._diagLabel.set_text([
-            _('mon %d  %s').format(this._index, this._displayName),
-            _('id %s').format(this._instanceId || '—'),
-            _('disp %dx%d scale=%s').format(this._pw ?? '?', this._ph ?? '?', this._scale ?? '?'),
-            _('tex %dx%d fourcc=0x%s backend=%s').format(
-                this._texW ?? '?', this._texH ?? '?', (this._fourcc ?? 0).toString(16), this._backend ?? '?'),
-            _('fps %s  frames %d').format(fps.toFixed(1), frames),
-            _('winstate 0x%s (%s)').format(f.toString(16), ws),
+            vprintf(_('mon %d  %s'), [this._index, this._displayName]),
+            vprintf(_('id %s'), [this._instanceId || '—']),
+            vprintf(_('disp %dx%d scale=%s'), [this._pw ?? '?', this._ph ?? '?', this._scale ?? '?']),
+            vprintf(_('tex %dx%d fourcc=0x%s backend=%s'), [
+                this._texW ?? '?', this._texH ?? '?', (this._fourcc ?? 0).toString(16), this._backend ?? '?']),
+            vprintf(_('fps %s  frames %d'), [fps.toFixed(1), frames]),
+            vprintf(_('winstate 0x%s (%s)'), [f.toString(16), ws]),
             `pause-effect cfg=${this._presentation?.config.generation ?? 0} ` +
             `dyn=${this._presentation?.state.generation ?? 0} ` +
             `kind=${this._presentation?.config.pauseEffect.kind ?? 0} ` +
