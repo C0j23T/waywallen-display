@@ -71,10 +71,23 @@ fn run_loop(event_socket: Socket, registry: BindingRegistry, commands: CommandSe
     loop {
         let event = match read_event() {
             Ok(event) => event,
-            Err(error) => {
-                log::error!("niri_watcher: read event: {error}");
-                break;
-            }
+            Err(error) => match error.downcast::<serde_json::Error>() {
+                Ok(error)
+                    if error.classify() == serde_json::error::Category::Data
+                        && error.to_string().starts_with("unknown variant `") =>
+                {
+                    // niri-ipc version mismatch
+                    log::warn!("niri_watcher: read event: {error}");
+                    continue;
+                }
+                Ok(error) => {
+                    log::error!("niri_watcher: read event: {error}");
+                    break;
+                }
+                Err(_) => {
+                    unreachable!()
+                }
+            },
         };
         state.apply(event);
         let snapshots =
