@@ -210,9 +210,14 @@ impl BlurTransition {
 }
 
 fn interpolate_blur(segment: BlurSegment, elapsed: Duration) -> f32 {
-    let progress = elapsed.as_secs_f32() / BLUR_TRANSITION_DURATION.as_secs_f32();
-    let inverse = 1.0 - progress.clamp(0.0, 1.0);
-    let eased = 1.0 - inverse * inverse * inverse;
+    let progress = (elapsed.as_secs_f32() / BLUR_TRANSITION_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+
+    let eased = if segment.target > segment.from {
+        1.0 - (1.0 - progress).powi(3)
+    } else {
+        progress.powi(3)
+    };
+
     segment.from + (segment.target - segment.from) * eased
 }
 
