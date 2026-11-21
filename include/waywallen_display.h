@@ -408,7 +408,9 @@ int waywallen_display_bind_vulkan(waywallen_display_t* d, const waywallen_vk_ctx
 
 /* Requirements for a host-owned Vulkan device used by bind_vulkan.
  * The returned extension array is immutable and library-owned. Vulkan
- * enum values are exposed as uint32_t so this header stays loader-only. */
+ * enum values are exposed as uint32_t so this header stays loader-only.
+ * Enable VK_EXT_image_drm_format_modifier as well when the device supports it
+ * to allow importing DMA-BUFs with explicit modifiers and plane layouts. */
 int waywallen_display_vulkan_requirements(waywallen_vk_requirements_t* out);
 
 /* Resolve a frame to its imported image for direct sampling. The host waits

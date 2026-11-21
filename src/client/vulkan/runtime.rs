@@ -112,17 +112,22 @@ impl VulkanRuntime {
             &requirements.device_extensions,
             compositor_drm,
         );
-        let (physical_device, graphics_queue_family, present_queue_family, device_name) =
-            match selected {
-                Ok(selected) => selected,
-                Err(error) => {
-                    for (_, vk_surface) in vk_surfaces.drain(..) {
-                        unsafe { surface_loader.destroy_surface(vk_surface, None) };
-                    }
-                    unsafe { instance.destroy_instance(None) };
-                    return Err(error);
+        let SelectedDevice {
+            physical_device,
+            graphics_queue_family,
+            present_queue_family,
+            name: device_name,
+            supports_drm_modifier,
+        } = match selected {
+            Ok(selected) => selected,
+            Err(error) => {
+                for (_, vk_surface) in vk_surfaces.drain(..) {
+                    unsafe { surface_loader.destroy_surface(vk_surface, None) };
                 }
-            };
+                unsafe { instance.destroy_instance(None) };
+                return Err(error);
+            }
+        };
 
         let priorities = [1.0f32];
         let mut queue_families = vec![graphics_queue_family];
@@ -143,6 +148,9 @@ impl VulkanRuntime {
             .map(|extension| extension.as_ptr())
             .collect();
         device_extensions.push(ash::khr::swapchain::NAME.as_ptr());
+        if supports_drm_modifier {
+            device_extensions.push(ash::ext::image_drm_format_modifier::NAME.as_ptr());
+        }
         let device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&device_extensions);
@@ -188,7 +196,7 @@ impl VulkanRuntime {
         };
         log::info!(
             "Vulkan WSI runtime ready: device={device_name} graphics_qfi={graphics_queue_family} \
-             present_qfi={present_queue_family} targets={}",
+             present_qfi={present_queue_family} drm_modifier={supports_drm_modifier} targets={}",
             vk_surfaces.len()
         );
 
@@ -320,6 +328,14 @@ fn importer_requirements() -> Result<ImporterRequirements> {
     })
 }
 
+struct SelectedDevice {
+    physical_device: vk::PhysicalDevice,
+    graphics_queue_family: u32,
+    present_queue_family: u32,
+    name: String,
+    supports_drm_modifier: bool,
+}
+
 fn select_physical_device<W: WindowSystem>(
     entry: &ash::Entry,
     instance: &ash::Instance,
@@ -328,7 +344,7 @@ fn select_physical_device<W: WindowSystem>(
     surfaces: &[(u32, vk::SurfaceKHR)],
     importer_extensions: &[CString],
     compositor_drm: (u32, u32),
-) -> Result<(vk::PhysicalDevice, u32, u32, String)> {
+) -> Result<SelectedDevice> {
     let devices =
         unsafe { instance.enumerate_physical_devices() }.context("vkEnumeratePhysicalDevices")?;
     let mut candidates = Vec::new();
@@ -411,19 +427,21 @@ fn select_physical_device<W: WindowSystem>(
         candidates.push((
             drm_match,
             unified_queue,
-            physical_device,
-            graphics_queue_family,
-            present_queue_family,
-            name,
+            SelectedDevice {
+                physical_device,
+                graphics_queue_family,
+                present_queue_family,
+                name,
+                supports_drm_modifier: available
+                    .contains(ash::ext::image_drm_format_modifier::NAME.to_bytes()),
+            },
         ));
     }
     candidates.sort_by_key(|candidate| device_candidate_sort_key(candidate.0, candidate.1));
     candidates
         .into_iter()
         .next()
-        .map(|(_, _, physical_device, graphics, present, name)| {
-            (physical_device, graphics, present, name)
-        })
+        .map(|(_, _, device)| device)
         .ok_or_else(|| {
             anyhow!(
                 "no Vulkan device satisfies display DMA-BUF import requirements and all {} targets",

@@ -236,6 +236,9 @@ int ww_vk_backend_load(ww_vk_backend_t* backend, VkInstance instance,
     RESOLVE(vkGetImageMemoryRequirements,
             PFN_vkGetImageMemoryRequirements,
             "vkGetImageMemoryRequirements");
+    RESOLVE(vkGetImageSubresourceLayout,
+            PFN_vkGetImageSubresourceLayout,
+            "vkGetImageSubresourceLayout");
     RESOLVE(vkAllocateMemory, PFN_vkAllocateMemory, "vkAllocateMemory");
     RESOLVE(vkFreeMemory, PFN_vkFreeMemory, "vkFreeMemory");
     RESOLVE(vkBindImageMemory, PFN_vkBindImageMemory, "vkBindImageMemory");
@@ -380,6 +383,16 @@ int ww_vk_import_dmabuf(const ww_vk_backend_t* backend, const ww_vk_dmabuf_impor
         return -EINVAL;
     }
 
+    const bool use_modifier = backend->have_modifier_ext;
+    if (! use_modifier && (im->modifier != WW_DRM_FORMAT_MOD_LINEAR || im->n_planes != 1)) {
+        ww_log(WAYWALLEN_LOG_ERROR,
+               "vk import: modifier=0x%" PRIx64 " n_planes=%u requires "
+               "VK_EXT_image_drm_format_modifier",
+               im->modifier,
+               im->n_planes);
+        return -ENOTSUP;
+    }
+
     /* Build per-plane layout descriptors. */
     VkSubresourceLayout plane_layouts[WW_VK_MAX_PLANES];
     memset(plane_layouts, 0, sizeof(plane_layouts));
@@ -389,7 +402,6 @@ int ww_vk_import_dmabuf(const ww_vk_backend_t* backend, const ww_vk_dmabuf_impor
         plane_layouts[p].size     = 0; /* driver computes */
     }
 
-    const bool use_modifier = backend->have_modifier_ext;
     VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info = {
         .sType             = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
         .pNext             = NULL,
@@ -426,17 +438,35 @@ int ww_vk_import_dmabuf(const ww_vk_backend_t* backend, const ww_vk_dmabuf_impor
     if (vr != VK_SUCCESS) {
         ww_log(WAYWALLEN_LOG_ERROR,
                "vk import: vkCreateImage failed: %s "
-               "(fourcc=0x%08x %ux%u modifier=0x%" PRIx64 " n_planes=%u) — "
-               "driver rejected the explicit modifier+plane layout; check "
-               "that the producer's modifier is in the importer's supported list",
+               "(fourcc=0x%08x %ux%u modifier=0x%" PRIx64 " n_planes=%u tiling=%s)",
                ww_vk_result_str(vr),
                im->fourcc,
                im->width,
                im->height,
                im->modifier,
-               im->n_planes);
+               im->n_planes,
+               use_modifier ? "DRM modifier" : "linear");
         if (vr == VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT) return -ENOTSUP;
         return -EIO;
+    }
+
+    if (! use_modifier) {
+        /* Core linear tiling has a driver-chosen layout and we bind at offset zero. */
+        const VkImageSubresource subresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT };
+        VkSubresourceLayout layout;
+        backend->vkGetImageSubresourceLayout(backend->device, out->image, &subresource, &layout);
+        if (layout.rowPitch != im->strides[0] || layout.offset != im->offsets[0]) {
+            ww_log(WAYWALLEN_LOG_ERROR,
+                   "vk import: linear DMA-BUF stride=%u offset=%u differs from Vulkan "
+                   "rowPitch=%" PRIu64 " offset=%" PRIu64,
+                   im->strides[0],
+                   im->offsets[0],
+                   (uint64_t)layout.rowPitch,
+                   (uint64_t)layout.offset);
+            backend->vkDestroyImage(backend->device, out->image, NULL);
+            out->image = VK_NULL_HANDLE;
+            return -ENOTSUP;
+        }
     }
 
     VkMemoryRequirements mem_req;
@@ -753,17 +783,16 @@ int ww_vk_query_format_caps(const ww_vk_backend_t* backend, uint32_t want_featur
 
         VkFormatProperties2 props = { 0 };
         props.sType               = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
-        props.pNext               = &list;
+        props.pNext               = backend->have_modifier_ext ? &list : NULL;
 
         gpdfp2(backend->physical_device, e->vk_format, &props);
-        if (list.drmFormatModifierCount == 0) {
-            /* No modifier extension: advertise LINEAR if usable. */
-            if (! backend->have_modifier_ext &&
-                (props.formatProperties.linearTilingFeatures & want_features) == want_features) {
-                emit(e->fourcc, 0ULL /* DRM_FORMAT_MOD_LINEAR */, 1u, user_data);
+        if (! backend->have_modifier_ext) {
+            if ((props.formatProperties.linearTilingFeatures & want_features) == want_features) {
+                emit(e->fourcc, WW_DRM_FORMAT_MOD_LINEAR, 1u, user_data);
             }
             continue;
         }
+        if (list.drmFormatModifierCount == 0) continue;
 
         VkDrmFormatModifierPropertiesEXT* entries = (VkDrmFormatModifierPropertiesEXT*)calloc(
             list.drmFormatModifierCount, sizeof(*entries));

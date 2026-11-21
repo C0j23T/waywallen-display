@@ -54,6 +54,7 @@ typedef struct ww_vk_backend {
     PFN_vkCreateImage                vkCreateImage;
     PFN_vkDestroyImage               vkDestroyImage;
     PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
+    PFN_vkGetImageSubresourceLayout   vkGetImageSubresourceLayout;
     PFN_vkAllocateMemory             vkAllocateMemory;
     PFN_vkFreeMemory                 vkFreeMemory;
     PFN_vkBindImageMemory            vkBindImageMemory;
@@ -140,14 +141,10 @@ typedef void (*ww_vk_caps_emit_fn)(uint32_t fourcc, uint64_t modifier, uint32_t 
                                    void* user_data);
 
 /*
- * Enumerate (fourcc, modifier) pairs the physical device advertises
- * for `want_features`-capable import via
- * `VK_EXT_image_drm_format_modifier`. Walks a fixed set of common
- * 32-bit RGBA fourccs; for each calls
- * `vkGetPhysicalDeviceFormatProperties2` with
- * `VkDrmFormatModifierPropertiesListEXT` chained in. Reports each
- * (fourcc, modifier) pair whose `drmFormatModifierTilingFeatures`
- * covers `want_features` via `emit`.
+ * Enumerate (fourcc, modifier) pairs usable for `want_features`-capable
+ * import. When the logical device enabled `VK_EXT_image_drm_format_modifier`,
+ * report the physical device's supported modifiers. Otherwise report only
+ * `DRM_FORMAT_MOD_LINEAR` for formats with the required linear tiling features.
  *
  * `want_features` is typically
  * `VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT`
@@ -194,9 +191,8 @@ int ww_vk_query_supports_device_local(const ww_vk_backend_t* backend, int* out_h
 
 /* Minimal lib-owned instance + device + queue suitable for the
  * DMABUF_RELAY backend. Picks the first physical device that exposes
- * VK_EXT_external_memory_dma_buf, VK_EXT_queue_family_foreign,
- * VK_EXT_image_drm_format_modifier, VK_KHR_external_memory_fd and their
- * required device extensions plus a transfer-capable queue family.
+ * the required DMA-BUF device extensions and a transfer-capable queue
+ * family. Enables VK_EXT_image_drm_format_modifier when available.
  *
  * Output handles are owned by the caller — destroy via
  * `ww_vk_destroy_owned`. */
