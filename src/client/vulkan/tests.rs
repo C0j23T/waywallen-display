@@ -165,7 +165,7 @@ fn blur_transition_uses_out_cubic_and_finishes_exactly() {
 }
 
 #[test]
-fn blur_transition_reverses_from_the_interpolated_value() {
+fn blur_transition_reverses_from_the_interpolated_value_using_in_cubic() {
     let now = Instant::now();
     let midpoint = now + BLUR_TRANSITION_DURATION / 2;
     let mut transition = BlurTransition::default();
@@ -176,7 +176,7 @@ fn blur_transition_reverses_from_the_interpolated_value() {
         transition
             .sample(midpoint + BLUR_TRANSITION_DURATION / 2)
             .radius,
-        7.0,
+        49.0,
     );
 }
 

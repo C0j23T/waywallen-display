@@ -71,23 +71,22 @@ fn run_loop(event_socket: Socket, registry: BindingRegistry, commands: CommandSe
     loop {
         let event = match read_event() {
             Ok(event) => event,
-            Err(error) => match error.downcast::<serde_json::Error>() {
-                Ok(error)
-                    if error.classify() == serde_json::error::Category::Data
-                        && error.to_string().starts_with("unknown variant `") =>
-                {
+            Err(error) => {
+                let unknown_variant = error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<serde_json::Error>())
+                    .is_some_and(|error| {
+                        error.classify() == serde_json::error::Category::Data
+                            && error.to_string().starts_with("unknown variant `")
+                    });
+                if unknown_variant {
                     // niri-ipc version mismatch
                     log::warn!("niri_watcher: read event: {error}");
                     continue;
                 }
-                Ok(error) => {
-                    log::error!("niri_watcher: read event: {error}");
-                    break;
-                }
-                Err(_) => {
-                    unreachable!()
-                }
-            },
+                log::error!("niri_watcher: read event: {error}");
+                break;
+            }
         };
         state.apply(event);
         let snapshots =

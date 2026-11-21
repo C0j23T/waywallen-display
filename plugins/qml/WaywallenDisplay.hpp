@@ -28,6 +28,7 @@ class WaywallenDisplay : public QQuickItem {
 
     Q_PROPERTY(QString socketPath READ socketPath WRITE setSocketPath NOTIFY socketPathChanged)
     Q_PROPERTY(QString displayName READ displayName WRITE setDisplayName NOTIFY displayNameChanged)
+    Q_PROPERTY(QString screenDisplayName READ screenDisplayName NOTIFY screenDisplayNameChanged)
     Q_PROPERTY(QString instanceId READ instanceId WRITE setInstanceId NOTIFY instanceIdChanged)
     Q_PROPERTY(
         DisplayRole displayRole READ displayRole WRITE setDisplayRole NOTIFY displayRoleChanged)
@@ -172,6 +173,7 @@ public:
     void    setSocketPath(const QString& path);
 
     QString displayName() const { return m_displayName; }
+    QString screenDisplayName() const;
     void    setDisplayName(const QString& name);
 
     QString instanceId() const { return effectiveInstanceId(); }
@@ -233,6 +235,7 @@ public:
 signals:
     void socketPathChanged();
     void displayNameChanged();
+    void screenDisplayNameChanged();
     void instanceIdChanged();
     void displayRoleChanged();
     void displayWidthChanged();
@@ -256,6 +259,7 @@ signals:
 
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* data) override;
+    void     itemChange(ItemChange change, const ItemChangeData& data) override;
     void     componentComplete() override;
     void     releaseResources() override;
 
@@ -265,6 +269,8 @@ private slots:
     void onHandshakeIO();
     void onWindowReady();
     void onScreenChanged(QScreen* screen);
+    void onTrackedScreenDestroyed();
+    void reconnectForScreenIdentity();
     void onDaemonNameOwnerChanged(const QString& name, const QString& oldOwner,
                                   const QString& newOwner);
     void onDaemonReadySignal();
@@ -293,6 +299,8 @@ private:
     void     resetPresentation();
     void     setConnState(ConnState s);
     void     setStreamState(StreamState s);
+    QScreen* trackedScreen() const;
+    bool     hasTrackedScreenProperty() const;
     QString  screenIdentityKey() const;
     QString  effectiveInstanceId() const;
     uint32_t screenRefreshMhz() const;
@@ -330,8 +338,9 @@ private:
     void setPresentedClearColor(const QColor& color);
 
     // C callback trampolines.
-    static void c_on_binding_ready(void* ud, const waywallen_binding_t* binding);
-    static void c_on_textures_releasing(void* ud, const waywallen_textures_t* t);
+    static WaywallenDisplay* callbackItem(void* ud);
+    static void              c_on_binding_ready(void* ud, const waywallen_binding_t* binding);
+    static void              c_on_textures_releasing(void* ud, const waywallen_textures_t* t);
     static void c_on_composition_config(void* ud, const waywallen_composition_config_t* config);
     static void c_on_frame_ready(void* ud, const waywallen_frame_t* f);
     static void c_on_presentation_snapshot(void*                                    ud,
@@ -343,6 +352,8 @@ private:
     QString          m_socketPath;
     QString          m_displayName { QStringLiteral("qml-display") };
     QString          m_instanceId;
+    QString          m_connectedInstanceId;
+    QString          m_connectedDisplayName;
     DisplayRole      m_displayRole = DesktopRole;
     int              m_displayWidth { 1920 };
     int              m_displayHeight { 1080 };
@@ -383,12 +394,12 @@ private:
 
     mutable QMutex                          m_resourcesMutex;
     std::shared_ptr<RenderSessionResources> m_renderResources;
-    /* QPointer so cross-thread access (sceneGraphInvalidated lambda
-     * runs on render thread) is safe — QPointer auto-clears when the
-     * underlying QObject is destroyed via deleteLater, and reads of
-     * a destroyed QPointer are well-defined (return nullptr). Raw
-     * pointers here used to require careful disconnect+deleteLater+
-     * null-write ordering across threads. */
+    QPointer<QQuickWindow>                  m_window;
+    QVector<QMetaObject::Connection>        m_windowConnections;
+    QMetaObject::Connection                 m_sessionInvalidationConnection;
+    QMetaObject::Connection                 m_frameEndConnection;
+    quint64                                 m_windowGeneration { 0 };
+    // Notifiers are only accessed on the GUI thread, including invalidation cleanup.
     QPointer<QSocketNotifier> m_notifier;
     QPointer<QSocketNotifier> m_notifierWrite;
 
@@ -399,8 +410,14 @@ private:
     uint32_t m_lastPushedRefreshMhz { 0 };
 
     // Backoff fallback for reconnect (see scheduleReconnectBackoff).
-    QTimer m_reconnectTimer;
-    int    m_reconnectDelayMs { 2000 };
+    QTimer                  m_reconnectTimer;
+    int                     m_reconnectDelayMs { 2000 };
+    QTimer                  m_screenIdentityTimer;
+    QPointer<QScreen>       m_observedScreen;
+    QMetaObject::Connection m_screenRefreshConnection;
+    QMetaObject::Connection m_screenDpiConnection;
+    QMetaObject::Connection m_screenDestroyedConnection;
+    QMetaObject::Connection m_screenToFollowConnection;
 
     // Backend detected from Qt's scene graph.
     enum ActiveBackend
